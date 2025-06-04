@@ -1,0 +1,65 @@
+version: '3'
+
+services:
+
+  mysql:
+    image: mysql
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: iot
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - ./database/database-data:/var/lib/mysql 
+    ports:
+      - "33061:3306"
+    networks:
+      - iot-net
+
+  broker:
+    image: eclipse-mosquitto
+    container_name: broker
+    volumes:
+      - ./broker/mosquitto.conf:/mosquitto.conf
+    ports:
+      - "8883:8883"
+      - "9001:9001"
+    networks:
+      - iot-net
+
+  api:
+    build: ./api
+    container_name: api
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_NAME=iot
+      - MQTT_BROKER=broker
+    depends_on:
+      - mysql
+      - broker
+    ports:
+      - "8080:8080"
+    networks:
+      - iot-net
+  
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - iot-net
+
+  ngrok:
+    image: ngrok/ngrok:alpine
+    container_name: ngrok
+volumes:
+  database-data:
+
+networks:
+  iot-net:
+    driver: bridge
