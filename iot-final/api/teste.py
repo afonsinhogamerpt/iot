@@ -1,8 +1,13 @@
 from flask import Flask, request, jsonify
 from flask_mysqldb import MySQL
 from flask_cors import CORS
+from flask_mqtt import Mqtt
+import paho.mqtt.client as paho
 import bcrypt
 import re
+import ssl
+import threading
+
 
 app = Flask(__name__)
 
@@ -15,9 +20,47 @@ app.config['MYSQL_DB'] = 'iot'
 
 mysql = MySQL(app)
 
+def on_connect(client, userdata, flags, rc, properties=None):
+    print("Connected with result code " + str(rc))
+    client.subscribe("$SYS/broker/clients/connected")
+
+def on_message(client, userdata, msg):
+    global connected_clients
+    print(f"[MQTT] Message received on topic {msg.topic}: {msg.payload.decode()}")
+    if msg.topic == "$SYS/broker/clients/connected":
+        try:
+            connected_clients = int(msg.payload.decode())
+            print(f"[MQTT] Clientes conectados: {connected_clients}")
+        except Exception as e:
+            print(f"[MQTT] Error parsing message: {e}")
+
+def mqtt_thread():
+    print("[MQTT] Starting MQTT thread...")
+    client = paho.Client()
+    client.username_pw_set("cristina", "cristina")
+    client.tls_set(cert_reqs=ssl.CERT_NONE)
+    client.tls_insecure_set(True)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    try:
+        client.connect("3.67.15.169", 19996, 60)
+        print("[MQTT] client.connect called")
+        client.loop_start() 
+    except Exception as e:
+        print(f"[MQTT] Connection failed: {e}")
+
+
 @app.route('/')
 def hello_world():
     return 'Hello World'
+
+connected_clients = 0
+
+
+@app.route('/status')
+def status():
+    return {"clientes_conectados": connected_clients}
+    
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -37,7 +80,7 @@ def login():
         # Verificar se o utilizador existe
         cur = mysql.connection.cursor()
         # Selecionar mais campos do utilizador
-        cur.execute("SELECT id, email, password FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT userID, email, password FROM users WHERE email = %s", (email,))
         user_data = cur.fetchone()
         cur.close()
         
@@ -48,11 +91,10 @@ def login():
         if bcrypt.checkpw(password.encode('utf-8'), user_data[2].encode('utf-8')):
             # Construir objeto de utilizador para retornar
             user = {
-                'id': user_data[0],
+                'userID': user_data[0],
                 'email': user_data[1]
             }
             return jsonify({
-                'message': 'Login successful',
                 'user': user
             }), 200
         else:
@@ -166,6 +208,107 @@ def removeCard():
     finally:
         cur.close()
     
+# novo endpoint
+@app.route('/getAuthorization', methods=['GET'])
+def getAuthorization():
+    cur = mysql.connection.cursor()
+    try:
+        cur.execute("SELECT userID, email, isAuthorized FROM users")
+        users = cur.fetchall()
+        cur.close()
+        
+        if not users:
+            return jsonify({'message': 'No users found'}), 404
+        
+        # Convert users to a list of dictionaries
+        users_list = []
+        for user in users:
+            users_list.append({
+                'userID': user[0],
+                'email': user[1],
+                'isAuthorized': user[2]
+            })
+        
+        return jsonify(users_list), 200
+    except Exception as e:
+        print(f"Error getting authorization: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# novo endpoint
+# temos de fazer uso do mqtt 
+@app.route('/addCardToUser', methods=['POST'])
+def addCardToUser():
+    request_data = request.get_json()
+    cardID = request_data.get('cardID')
+    email = request_data.get('email')
+    
+    if not cardID or not email:
+        return jsonify({'error': 'Card ID and email are required'}), 400
+    
+    cur = mysql.connection.cursor()
+    
+    try:
+        # Check if the user exists
+        cur.execute("SELECT userID FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        user_id = user[0]
+        
+        # Check if the card already exists
+        cur.execute("SELECT * FROM Cards WHERE cardID = %s", (cardID,))
+        existing_card = cur.fetchone()
+        
+        if not existing_card:
+            return jsonify({'error': 'Card does not exist'}), 404
+        
+        # Add the card to the user
+        cur.execute("INSERT INTO Cards (cardID, userID) VALUES (%s, %s)", (cardID, user_id))
+        mysql.connection.commit()
+        
+        return jsonify({'message': 'Card added to user successfully'}), 201
+    except Exception as e:
+        print(f"Error adding card to user: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        cur.close()
+
+# remover card from user
+# temos de fazer uso do mqtt 
+@app.route('/removeCardFromUser', methods=['POST'])
+def removeCardFromUser():
+    request_data = request.get_json()
+    cardID = request_data.get('cardID')
+    email = request_data.get('email')
+    
+    cur = mysql.connection.cursor()
+    
+    
+    # Tem de se ir buscar o id do user a a partir do email
+    
+    try:
+        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+        
+        if not user:
+            cur.close()
+            return jsonify({'error': 'Utilizador não encontrado'}), 404
+        
+        
+        return user is not None
+    finally:
+        cur.close()
+
+
+
+
+
+
+
+
 
 
 # Helper functions
@@ -305,7 +448,8 @@ def create_user(user_data):
         cur.close()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    mqtt_thread()
+    app.run(host='0.0.0.0', port=8080, debug=False)
 
     
     

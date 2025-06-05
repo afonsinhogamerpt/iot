@@ -1,0 +1,9 @@
+version: 2
+authtoken: 2uoojW4tEowyiUtQzfhtfw7y3Aj_4dsmEnZ5vMefyEfxX4Tmx
+tunnels:
+  frontend:
+    proto: http
+    addr: frontend:80
+  broker:
+    proto: tcp
+    addr: nginx:8883

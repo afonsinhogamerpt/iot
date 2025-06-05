@@ -21,7 +21,9 @@ services:
     image: eclipse-mosquitto
     container_name: broker
     volumes:
-      - ./broker/mosquitto.conf:/mosquitto.conf
+      - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./broker/broker-password/passwd:/mosquitto/passwd 
+      - ./broker/certs:/mosquitto/config/certs
     ports:
       - "8883:8883"
       - "9001:9001"
@@ -53,17 +55,36 @@ services:
       - "443:443"
     networks:
       - iot-net
-
-  ngrok:
-    image: ngrok/ngrok:alpine
-    container_name: ngrok
+    depends_on:
+      - broker 
+ 
+  ngrok-http:
+    image: ngrok/ngrok:latest
+    container_name: ngrok-http
     ports:
       - "4040:4040"
-    environment:
-      NGROK_AUTHTOKEN: 2uoojW4tEowyiUtQzfhtfw7y3Aj_4dsmEnZ5vMefyEfxX4Tmx
     command: http frontend:80
+    environment:
+      - NGROK_AUTHTOKEN=2uoojW4tEowyiUtQzfhtfw7y3Aj_4dsmEnZ5vMefyEfxX4Tmx
+    depends_on:
+      - frontend
     networks:
       - iot-net
+
+  ngrok-tcp:
+    image: ngrok/ngrok:latest
+    container_name: ngrok-tcp
+    command: tcp broker:8883
+    ports:
+      - "4041:4040"
+    environment:
+      - NGROK_AUTHTOKEN=2uoojW4tEowyiUtQzfhtfw7y3Aj_4dsmEnZ5vMefyEfxX4Tmx
+    depends_on:
+      - broker
+    networks:
+      - iot-net
+
+
 volumes:
   database-data:
 
