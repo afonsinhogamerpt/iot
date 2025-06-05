@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify
 from flask_mysqldb import MySQL
+from flask_cors import CORS
 import bcrypt
 import re
 
 app = Flask(__name__)
 
+CORS(app)
 app.config['MYSQL_HOST'] = 'mysql'
 app.config['MYSQL_USER'] = 'user'
 app.config['MYSQL_PASSWORD'] = 'password'
@@ -34,16 +36,25 @@ def login():
         
         # Verificar se o utilizador existe
         cur = mysql.connection.cursor()
-        cur.execute("SELECT password FROM users WHERE email = %s", (email,))
-        user = cur.fetchone()
+        # Selecionar mais campos do utilizador
+        cur.execute("SELECT id, email, password FROM users WHERE email = %s", (email,))
+        user_data = cur.fetchone()
         cur.close()
         
-        if not user:
+        if not user_data:
             return jsonify({'error': 'Invalid username or password'}), 401
             
-        # Verify password
-        if bcrypt.checkpw(password.encode('utf-8'), user[0].encode('utf-8')):
-            return jsonify({'message': 'Login successful'}), 200
+        # Verify password (o password está no índice 2 assumindo que selecionamos id, email, password, ...)
+        if bcrypt.checkpw(password.encode('utf-8'), user_data[2].encode('utf-8')):
+            # Construir objeto de utilizador para retornar
+            user = {
+                'id': user_data[0],
+                'email': user_data[1]
+            }
+            return jsonify({
+                'message': 'Login successful',
+                'user': user
+            }), 200
         else:
             return jsonify({'error': 'Invalid username or password'}), 401
         
@@ -166,6 +177,121 @@ def check_user_exists(email):
         return user is not None
     finally:
         cur.close()
+
+
+@app.route('/getCards', methods=['GET'])
+def getCards():
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT * FROM Cards")
+        cards = cur.fetchall()
+        cur.close()
+        if not cards:
+            return jsonify({'message': 'Nenhum cartão encontrado'}), 404
+        # Convert cards to a list of dictionaries
+        cards_list = []
+        for card in cards:
+            cards_list.append({
+                'cardID': card[0],
+                'userID': card[1],
+            })
+        return jsonify(cards_list), 200
+    except Exception as e:
+        print(f"Erro ao obter cartões: {str(e)}")
+        return jsonify({'error': 'Erro interno do servidor'}), 500
+    
+@app.route('/getHistory', methods=['GET'])
+def getHistory():
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT * FROM registo")
+        history = cur.fetchall()
+        cur.close()
+        if not history:
+            return jsonify({'message': 'Histórico não encontrado'}), 404
+        # Convert history to a list of dictionaries
+        history_list = []
+        for record in history:
+            history_list.append({
+                'registoID': record[0],
+                'tempo': record[1],
+                'status_entrada': record[2],
+                'userID': record[3],
+                'cardID': record[4],
+            })
+        return jsonify(history_list), 200
+    except Exception as e:
+        print(f"Erro ao obter histórico: {str(e)}")
+        return jsonify({'error': 'Erro interno do servidor'}), 500
+
+@app.route('/addCard', methods=['POST'])
+def addCard():
+    request_data = request.get_json()
+
+    cardID = request_data.get('cardID')
+
+    if not cardID:
+        return jsonify({'error': 'Card ID are required'}), 400
+
+    cur = mysql.connection.cursor()
+
+    try:
+        # Check if the card already exists
+        cur.execute("SELECT * FROM Cards WHERE cardID = %s", (cardID,))
+        existing_card = cur.fetchone()
+
+        if existing_card:
+            return jsonify({'error': 'Card already exists'}), 409
+        cur.execute("INSERT INTO Cards (cardID) VALUES (%s)", (cardID,))
+        mysql.connection.commit()
+
+        return jsonify({'message': 'Card added successfully'}), 201
+    except Exception as e:
+        print(f"Error adding card: {str(e)}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+    finally:
+        cur.close()
+        
+@app.route('/getCardsUser', methods=['GET'])
+def getCardsUser():
+    request_data = request.get_json()
+    email = request_data.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    cur = mysql.connection.cursor()
+
+    try:
+        # Get user ID from email
+        cur.execute("SELECT userID FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        user_id = user[0]
+
+        cur.execute("SELECT * FROM Cards WHERE userID = %s", (user_id,))
+        cards = cur.fetchall()
+
+        if not cards:
+            return jsonify({'message': 'No cards found for this user'}), 404
+
+        cards_list = []
+        for card in cards:
+            cards_list.append({
+                'cardID': card[0],
+                'userID': card[1],
+            })
+
+        return jsonify(cards_list), 200
+    except Exception as e:
+        print(f"Error getting cards for user: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        cur.close() 
+
 
 def create_user(user_data):
     cur = mysql.connection.cursor()

@@ -41,7 +41,7 @@ services:
       - mysql
       - broker
     ports:
-      - "8080:8080"
+      - "8085:8080"
     networks:
       - iot-net
   
@@ -57,6 +57,13 @@ services:
   ngrok:
     image: ngrok/ngrok:alpine
     container_name: ngrok
+    ports:
+      - "4040:4040"
+    environment:
+      NGROK_AUTHTOKEN: 2uoojW4tEowyiUtQzfhtfw7y3Aj_4dsmEnZ5vMefyEfxX4Tmx
+    command: http frontend:80
+    networks:
+      - iot-net
 volumes:
   database-data:
 
