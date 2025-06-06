@@ -17,7 +17,7 @@ app.config['MYSQL_USER'] = 'user'
 app.config['MYSQL_PASSWORD'] = 'password'
 app.config['MYSQL_DB'] = 'iot'
 
-
+client = None
 mysql = MySQL(app)
 
 def on_connect(client, userdata, flags, rc, properties=None):
@@ -35,6 +35,7 @@ def on_message(client, userdata, msg):
             print(f"[MQTT] Error parsing message: {e}")
 
 def mqtt_thread():
+    global client 
     print("[MQTT] Starting MQTT thread...")
     client = paho.Client()
     client.username_pw_set("cristina", "cristina")
@@ -43,7 +44,7 @@ def mqtt_thread():
     client.on_connect = on_connect
     client.on_message = on_message
     try:
-        client.connect("3.67.15.169", 19996, 60)
+        client.connect("4.tcp.eu.ngrok.io", 11464, 60)
         print("[MQTT] client.connect called")
         client.loop_start() 
     except Exception as e:
@@ -266,15 +267,52 @@ def addCardToUser():
             return jsonify({'error': 'Card does not exist'}), 404
         
         # Add the card to the user
-        cur.execute("INSERT INTO Cards (cardID, userID) VALUES (%s, %s)", (cardID, user_id))
+        #cur.execute("INSERT INTO Cards (cardID, userID) VALUES (%s, %s)", (cardID, user_id))
+        cur.execute("UPDATE Cards SET userID = %s WHERE cardID = %s", (user_id, cardID))
         mysql.connection.commit()
         
         return jsonify({'message': 'Card added to user successfully'}), 201
     except Exception as e:
         print(f"Error adding card to user: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
+        return jsonify({'error': str(e)}), 500
     finally:
         cur.close()
+
+@app.route('/addCardToUserBroker', methods=['POST'])        
+def addCardToUserBroker():
+    global client
+    request_data = request.get_json()
+    email = request_data.get('userID')
+    
+    if not email:
+        return jsonify({'erro': 'User not found'}), 404
+    
+    cur = mysql.connection.cursor()
+    
+    cur.execute("SELECT userID FROM Users WHERE email=%s",(email,))
+    user = cur.fetchone()
+    
+    if user is None:
+        return jsonify({'erro': 'user nao foi encontrado'}), 404
+    
+    userID = user[0]
+    
+    
+    try:
+        if client is None:
+            return jsonify({'error': 'MQTT client not initialized'}), 500
+        
+        topic = "topic/RequestCard"
+        message = f"ON:{userID}"
+        
+        client.publish(topic, message)
+        print(f"[MQTT] Published to {topic}: {message}")
+        
+        return jsonify({'message': f'Message published to {topic}', 'payload': message}), 200
+    except Exception as e:
+        print(f"[MQTT] Error publishing message: {e}")
+        return jsonify({'error': 'Failed to publish MQTT message'}), 500
+        
 
 # remover card from user
 # temos de fazer uso do mqtt 
@@ -286,30 +324,111 @@ def removeCardFromUser():
     
     cur = mysql.connection.cursor()
     
+    if not cardID or not email:
+        return jsonify({'erro':'email e carid necessarios'}), 400
     
     # Tem de se ir buscar o id do user a a partir do email
     
     try:
-        cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT * FROM Users WHERE email = %s", (email,))
         user = cur.fetchone()
         
         if not user:
             cur.close()
             return jsonify({'error': 'Utilizador não encontrado'}), 404
         
+        userID = user[0]
         
-        return user is not None
+        cur.execute("SELECT * FROM Cards WHERE userID = %s AND cardID =%s ", (userID, cardID ))
+        card = cur.fetchone()
+        
+        if not card:
+            return jsonify({'erro': 'cartao nao encontrado'}), 404
+        
+        
+        cur.execute("UPDATE Cards SET userID= NULL WHERE cardID = %s",(cardID, ))
+        mysql.connection.commit()
+        return jsonify({'nice': 'apagad com sucesso'}), 200
+    
+    except Exception as e:
+        print(f"Erro ao remover cartão: {str(e)}")
+        return jsonify({'error': 'Erro interno do servidor'}), 500
     finally:
         cur.close()
 
+@app.route('/removeCardFromUserBroker', methods=['POST'])
+def removeCardFromUserBroker():
+    global client
+    request_data = request.get_json()
+    email = request_data.get('userID')
+    
+    if not email:
+        return jsonify({'erro': 'User not found'}), 404
+    
+    cur = mysql.connection.cursor()
+    
+    cur.execute("SELECT userID FROM Users WHERE email=%s",(email,))
+    user = cur.fetchone()
+    
+    userID = user[0]
+    
+    try:
+        if client is None:
+            return jsonify({'error': 'MQTT client not initialized'}), 500
+        
+        topic = "topic/RemoveCard"
+        message = f"ON:{userID}"
+        
+        client.publish(topic, message)
+        print(f"[MQTT] Published to {topic}: {message}")
+        
+        return jsonify({'message': f'Message published to {topic}', 'payload': message}), 200
+    except Exception as e:
+        print(f"[MQTT] Error publishing message: {e}")
+        return jsonify({'error': 'Failed to publish MQTT message'}), 500
 
 
+@app.route('/verifyUser', methods=['POST'])
+def verifyUser():
+    request_data = request.get_json()
+    cardID = request_data.get('cardID')
+    
+    if not cardID:
+        return jsonify({'erro': 'ecardid tem que ser indicado'}), 404
+    
+    cur = mysql.connection.cursor()
+    try:
+    
+        cur.execute("SELECT userID FROM Cards WHERE cardID=%s", (cardID,))
+        card = cur.fetchone()
+        
+        if not card:
+            return jsonify({'erro': 'card nao encontrado'}), 404
+        
+        userID = card[0]
+        
+        cur.execute("SELECT isAuthorized FROM Users WHERE userID =%s", (userID, ))
+        user = cur.fetchone()
+        
+        if not user:
+            return jsonify({'erro': 'user nao encontrado'}), 404
+        auth = user[0]
+        
+        return jsonify({'isAuthorized': auth}), 200
+    
+    except Exception as e:
+        print(f"Erro ao verificar utilizador: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
+    finally:
+        cur.close()
+    
+#@app.route('/registoEntradas', methods=['POST'])
+#def registoEntradas():
+    #request_data = request.get_json()
+    #cardID
 
-
-
-
-
+#FIQUEI AQUI
 
 # Helper functions
 def check_user_exists(email):
