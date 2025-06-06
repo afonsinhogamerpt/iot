@@ -57,7 +57,7 @@ services:
       - iot-net
     depends_on:
       - broker 
- 
+
   ngrok-http:
     image: ngrok/ngrok:latest
     container_name: ngrok-http

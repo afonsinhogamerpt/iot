@@ -6,7 +6,6 @@ import paho.mqtt.client as paho
 import bcrypt
 import re
 import ssl
-import threading
 
 
 app = Flask(__name__)
@@ -19,7 +18,6 @@ app.config['MYSQL_DB'] = 'iot'
 
 client = None
 mysql = MySQL(app)
-
 def on_connect(client, userdata, flags, rc, properties=None):
     print("Connected with result code " + str(rc))
     client.subscribe("$SYS/broker/clients/connected")
@@ -33,39 +31,40 @@ def on_message(client, userdata, msg):
             print(f"[MQTT] Clientes conectados: {connected_clients}")
         except Exception as e:
             print(f"[MQTT] Error parsing message: {e}")
-
 def mqtt_thread():
     global client 
     print("[MQTT] Starting MQTT thread...")
     client = paho.Client()
-    client.username_pw_set("cristina", "cristina")
-    client.tls_set(cert_reqs=ssl.CERT_NONE)
-    client.tls_insecure_set(True)
+    client.username_pw_set("ricardo", "ricardo")
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    client.tls_set_context(context)
     client.on_connect = on_connect
     client.on_message = on_message
     try:
-        client.connect("4.tcp.eu.ngrok.io", 11464, 60)
+        
+        client.connect("4.tcp.eu.ngrok.io", 15453, 60)
         print("[MQTT] client.connect called")
         client.loop_start() 
     except Exception as e:
         print(f"[MQTT] Connection failed: {e}")
 
 
-@app.route('/')
+@app.route('/api/')
 def hello_world():
     return 'Hello World'
 
 connected_clients = 0
 
-
-@app.route('/status')
+@app.route('/api/status')
 def status():
     return {"clientes_conectados": connected_clients}
     
 
-@app.route('/login', methods=['POST'])
+@app.route('/api/login', methods=['POST'])
 def login():
-    # verificar o metodo primeiro
+    
     if request.method == 'POST':
         
         # obter as variaveis do form
@@ -103,7 +102,7 @@ def login():
         
     return jsonify({'error': 'Method not allowed'}), 405
 
-@app.route('/register', methods=['POST'])
+@app.route('/api/register', methods=['POST'])
 def register():
     try:
         # Get form data
@@ -149,7 +148,7 @@ def register():
         return jsonify({'error': 'Registration failed'}), 500
 
 
-@app.route('/updateUserAuth', methods=['POST'])
+@app.route('/api/updateUserAuth', methods=['POST'])
 def updateUserAuth():
     try:
         # Get JSON data
@@ -198,7 +197,7 @@ def updateUserAuth():
         return jsonify({'error': 'Erro interno do servidor'}), 500
 
 
-@app.route('/removeCard', methods=['POST'])
+@app.route('/api/removeCard', methods=['POST'])
 def removeCard():
     request_data = request.get_json()
     cur = mysql.connection.cursor()
@@ -210,7 +209,7 @@ def removeCard():
         cur.close()
     
 # novo endpoint
-@app.route('/getAuthorization', methods=['GET'])
+@app.route('/api/getAuthorization', methods=['GET'])
 def getAuthorization():
     cur = mysql.connection.cursor()
     try:
@@ -238,7 +237,7 @@ def getAuthorization():
 
 # novo endpoint
 # temos de fazer uso do mqtt 
-@app.route('/addCardToUser', methods=['POST'])
+@app.route('/api/addCardToUser', methods=['POST'])
 def addCardToUser():
     request_data = request.get_json()
     cardID = request_data.get('cardID')
@@ -278,7 +277,47 @@ def addCardToUser():
     finally:
         cur.close()
 
-@app.route('/addCardToUserBroker', methods=['POST'])        
+@app.route('/api/turnOnLed', methods=['POST'])
+def turnOnLed():
+    global client
+
+    try:
+        if client is None:
+            return jsonify({'error': 'MQTT client not initialized'}), 500
+
+        topic = "topic/led"
+        message = "ON"
+
+        client.publish(topic, message)
+        print(f"[MQTT] Published to {topic}: {message}")
+
+        return jsonify({'message': f'Message published to {topic}', 'payload': message}), 200
+
+    except Exception as e:
+        print(f"[MQTT] Error publishing message: {e}")
+        return jsonify({'error': 'Failed to publish MQTT message'}), 500
+
+@app.route('/api/turnOffLed', methods=['POST'])
+def turnOffLed():
+    global client
+
+    try:
+        if client is None:
+            return jsonify({'error': 'MQTT client not initialized'}), 500
+
+        topic = "topic/led"
+        message = "OFF"
+
+        client.publish(topic, message)
+        print(f"[MQTT] Published to {topic}: {message}")
+
+        return jsonify({'message': f'Message published to {topic}', 'payload': message}), 200
+
+    except Exception as e:
+        print(f"[MQTT] Error publishing message: {e}")
+        return jsonify({'error': 'Failed to publish MQTT message'}), 500
+
+@app.route('/api/addCardToUserBroker', methods=['POST'])        
 def addCardToUserBroker():
     global client
     request_data = request.get_json()
@@ -316,7 +355,7 @@ def addCardToUserBroker():
 
 # remover card from user
 # temos de fazer uso do mqtt 
-@app.route('/removeCardFromUser', methods=['POST'])
+@app.route('/api/removeCardFromUser', methods=['POST'])
 def removeCardFromUser():
     request_data = request.get_json()
     cardID = request_data.get('cardID')
@@ -356,7 +395,7 @@ def removeCardFromUser():
     finally:
         cur.close()
 
-@app.route('/removeCardFromUserBroker', methods=['POST'])
+@app.route('/api/removeCardFromUserBroker', methods=['POST'])
 def removeCardFromUserBroker():
     global client
     request_data = request.get_json()
@@ -388,7 +427,7 @@ def removeCardFromUserBroker():
         return jsonify({'error': 'Failed to publish MQTT message'}), 500
 
 
-@app.route('/verifyUser', methods=['POST'])
+@app.route('/api/verifyUser', methods=['POST'])
 def verifyUser():
     request_data = request.get_json()
     cardID = request_data.get('cardID')
@@ -423,12 +462,32 @@ def verifyUser():
     finally:
         cur.close()
     
-#@app.route('/registoEntradas', methods=['POST'])
-#def registoEntradas():
-    #request_data = request.get_json()
-    #cardID
-
-#FIQUEI AQUI
+@app.route('/api/registoEntradas', methods=['POST'])
+def registoEntradas():
+    request_data = request.get_json()
+    cardID = request_data.get('cardID')
+    status = request_data.get('isAuthorized')
+    
+    if not cardID or (status != 0 and status!=1):
+        return jsonify({'erro': 'insira o cartao e o status'}), 404
+    
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT * FROM Cards WHERE cardID =%s", (cardID, ))
+        user = cur.fetchone()
+        
+        if not user:
+            return jsonify({'erro', 'utilizador nao encontrado'}), 404
+        
+        userID = user[1]
+        cur.execute("UPDATE Users SET isAuthorized = %s  WHERE userID = %s" , (status, userID))
+        cur.execute("INSERT INTO Registo (status_entrada, userID, cardID) VALUES (%s, %s, %s)", (status, userID, cardID))
+        mysql.connection.commit()
+        return jsonify({'nice': 'feito'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+        
+    
 
 # Helper functions
 def check_user_exists(email):
@@ -441,7 +500,7 @@ def check_user_exists(email):
         cur.close()
 
 
-@app.route('/getCards', methods=['GET'])
+@app.route('/api/getCards', methods=['GET'])
 def getCards():
     try:
         cur = mysql.connection.cursor()
@@ -462,7 +521,7 @@ def getCards():
         print(f"Erro ao obter cartões: {str(e)}")
         return jsonify({'error': 'Erro interno do servidor'}), 500
     
-@app.route('/getHistory', methods=['GET'])
+@app.route('/api/getHistory', methods=['GET'])
 def getHistory():
     try:
         cur = mysql.connection.cursor()
@@ -486,7 +545,7 @@ def getHistory():
         print(f"Erro ao obter histórico: {str(e)}")
         return jsonify({'error': 'Erro interno do servidor'}), 500
 
-@app.route('/addCard', methods=['POST'])
+@app.route('/api/addCard', methods=['POST'])
 def addCard():
     request_data = request.get_json()
 
@@ -514,7 +573,7 @@ def addCard():
     finally:
         cur.close()
         
-@app.route('/getCardsUser', methods=['GET'])
+@app.route('/api/getCardsUser', methods=['GET'])
 def getCardsUser():
     request_data = request.get_json()
     email = request_data.get('email')
