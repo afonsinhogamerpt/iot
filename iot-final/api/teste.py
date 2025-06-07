@@ -43,8 +43,7 @@ def mqtt_thread():
     client.on_connect = on_connect
     client.on_message = on_message
     try:
-        
-        client.connect("4.tcp.eu.ngrok.io", 15453, 60)
+        client.connect("4.tcp.eu.ngrok.io", 11683, 60)
         print("[MQTT] client.connect called")
         client.loop_start() 
     except Exception as e:
@@ -200,7 +199,9 @@ def updateUserAuth():
 @app.route('/api/removeCard', methods=['POST'])
 def removeCard():
     request_data = request.get_json()
+    email = request_data['email']
     cur = mysql.connection.cursor()
+    
     try:
         cur.execute("SELECT * FROM Cards WHERE email = %s", (email,))
         user = cur.fetchone()
@@ -392,6 +393,29 @@ def removeCardFromUser():
     except Exception as e:
         print(f"Erro ao remover cartão: {str(e)}")
         return jsonify({'error': 'Erro interno do servidor'}), 500
+    finally:
+        cur.close()
+
+@app.route('/api/getEmail', methods=['POST'])
+def getEmail():
+    request_data = request.get_json()
+    userID = request_data['userID']
+    
+    cur = mysql.connection.cursor()
+    
+    if not userID:
+        return jsonify({'erro': 'indica o userID'}), 404
+    
+    try:
+        cur.execute('SELECT email FROM Users WHERE userID=%s', (userID,))
+        email = cur.fetchone()
+        
+        if not email:
+            return jsonify({'erro': 'email nao encontrado'}), 404
+        
+        return jsonify({'email': email[0]}), 200
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
     finally:
         cur.close()
 
